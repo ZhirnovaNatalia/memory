@@ -781,6 +781,15 @@
     loadFontScale();
     renderFeed();
     console.log('🧠 Лента Припоминания загружена!');
+
 </script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+
+
 </body>
 </html>
