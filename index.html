@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-<link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="manifest.json">
     <title>Лента Припоминания</title>
     <style>
         * {
@@ -24,6 +24,8 @@
             --border: #e0e0ea;
             --transition: all 0.2s ease;
             --text-scale: 1;
+            --tag-bg: #e8e0f5;
+            --tag-text: #4a2d7a;
         }
 
         [data-theme="dark"] {
@@ -34,6 +36,8 @@
             --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
             --spoiler-bg: #2a2a3e;
             --border: #33334a;
+            --tag-bg: #2d1f4a;
+            --tag-text: #c4b0e0;
         }
 
         html {
@@ -205,6 +209,33 @@
             min-height: 60px;
         }
 
+        .form-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .form-row input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .form-row .btn-sm {
+            padding: 0 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--text);
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+        }
+
+        .form-row .btn-sm:active {
+            transform: scale(0.94);
+        }
+
         .btn {
             border: none;
             border-radius: 8px;
@@ -246,6 +277,38 @@
             font-size: 0.9rem;
         }
 
+        .controls .filter-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group select {
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--card-bg);
+            color: var(--text);
+            font-size: 0.85rem;
+            max-width: 140px;
+        }
+
+        .filter-group .clear-filter {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .filter-group .clear-filter:hover {
+            background: #fee2e2;
+            color: #e11d48;
+        }
+
         .feed {
             display: flex;
             flex-direction: column;
@@ -275,10 +338,29 @@
         .card .question {
             font-size: 1.1rem;
             font-weight: 600;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
             padding-left: 12px;
             border-left: 4px solid var(--accent);
             word-wrap: break-word;
+        }
+
+        .card .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 10px;
+            padding-left: 12px;
+        }
+
+        .card .tag {
+            background: var(--tag-bg);
+            color: var(--tag-text);
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            display: inline-block;
         }
 
         .answer-block {
@@ -416,6 +498,9 @@
             .font-controls input[type="range"] {
                 width: 70px;
             }
+            .filter-group select {
+                max-width: 100%;
+            }
         }
     </style>
 </head>
@@ -446,13 +531,23 @@
     <div class="form-box">
         <input type="text" id="qInput" placeholder="❓ Вопрос..." autocomplete="off">
         <textarea id="aInput" placeholder="📝 Ответ..." autocomplete="off"></textarea>
+        <div class="form-row">
+            <input type="text" id="tagInput" placeholder="🏷️ Теги (через запятую)" autocomplete="off">
+            <button class="btn-sm" id="addTagBtn">➕</button>
+        </div>
         <button class="btn btn-primary" id="addBtn">➕ Добавить карточку</button>
     </div>
 
     <!-- Управление -->
     <div class="controls">
         <span class="counter" id="counter">📚 0 карточек</span>
-        <button class="btn btn-shuffle" id="shuffleBtn">🔀 Перемешать</button>
+        <div class="filter-group">
+            <select id="tagFilter">
+                <option value="">Все теги</option>
+            </select>
+            <button class="clear-filter" id="clearFilter">✕</button>
+            <button class="btn btn-shuffle" id="shuffleBtn">🔀</button>
+        </div>
     </div>
 
     <!-- Лента -->
@@ -467,12 +562,15 @@
     const FONT_KEY = 'fontScale';
 
     let cards = loadCards();
+    let filterTag = '';
 
     // ===== DOM =====
     const feed = document.getElementById('feed');
     const counter = document.getElementById('counter');
     const qInput = document.getElementById('qInput');
     const aInput = document.getElementById('aInput');
+    const tagInput = document.getElementById('tagInput');
+    const addTagBtn = document.getElementById('addTagBtn');
     const addBtn = document.getElementById('addBtn');
     const shuffleBtn = document.getElementById('shuffleBtn');
     const themeToggle = document.getElementById('themeToggle');
@@ -480,6 +578,8 @@
     const fontSizeLabel = document.getElementById('fontSizeLabel');
     const fontInc = document.getElementById('fontInc');
     const fontDec = document.getElementById('fontDec');
+    const tagFilter = document.getElementById('tagFilter');
+    const clearFilter = document.getElementById('clearFilter');
 
     // ===== Загрузка карточек =====
     function loadCards() {
@@ -487,13 +587,16 @@
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed) && parsed.length) return parsed;
+                if (Array.isArray(parsed) && parsed.length) {
+                    // ensure tags field exists
+                    return parsed.map(c => ({ ...c, tags: c.tags || [] }));
+                }
             }
         } catch (_) {}
         return [
-            { q: "💡 В чем главный плюс Активного Припоминания?", a: "Оно заставляет мозг напрягаться, создавая прочные нейронные связи." },
-            { q: "📚 Как называется система карточек по ячейкам?", a: "Система Лейтнера (Leitner system)." },
-            { q: "🧠 Какой эффект укрепляет память лучше перечитывания?", a: "Эффект тестирования (Testing Effect)." }
+            { q: "💡 В чем главный плюс Активного Припоминания?", a: "Оно заставляет мозг напрягаться, создавая прочные нейронные связи.", tags: ["🧠 память", "метод"] },
+            { q: "📚 Как называется система карточек по ячейкам?", a: "Система Лейтнера (Leitner system).", tags: ["📚 обучение"] },
+            { q: "🧠 Какой эффект укрепляет память лучше перечитывания?", a: "Эффект тестирования (Testing Effect).", tags: ["🧠 память"] }
         ];
     }
 
@@ -501,40 +604,85 @@
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
         } catch (_) {}
+        updateFilterOptions();
+    }
+
+    // ===== Теги =====
+    function getAllTags() {
+        const tagSet = new Set();
+        cards.forEach(c => (c.tags || []).forEach(t => tagSet.add(t.trim())));
+        return Array.from(tagSet).filter(t => t);
+    }
+
+    function updateFilterOptions() {
+        const allTags = getAllTags();
+        const currentVal = tagFilter.value;
+        tagFilter.innerHTML = '<option value="">Все теги</option>';
+        allTags.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            tagFilter.appendChild(opt);
+        });
+        if (currentVal && allTags.includes(currentVal)) {
+            tagFilter.value = currentVal;
+        } else {
+            tagFilter.value = '';
+            filterTag = '';
+        }
+    }
+
+    function getFilteredCards() {
+        if (!filterTag) return cards;
+        return cards.filter(c => (c.tags || []).includes(filterTag));
     }
 
     // ===== Рендер =====
     function renderFeed() {
-        if (!cards.length) {
-            feed.innerHTML = `<div class="empty">📭 Нет карточек. Добавь свою первую!</div>`;
-            counter.textContent = '📚 0 карточек';
+        const filtered = getFilteredCards();
+        if (!filtered.length) {
+            feed.innerHTML = `<div class="empty">📭 Нет карточек${filterTag ? ' с тегом "' + filterTag + '"' : ''}. Добавь свою первую!</div>`;
+            counter.textContent = `📚 ${cards.length} карточек${filterTag ? ' (фильтр: ' + filterTag + ')' : ''}`;
             return;
         }
 
-        counter.textContent = `📚 ${cards.length} карточек`;
+        counter.textContent = `📚 ${cards.length} карточек${filterTag ? ' (фильтр: ' + filterTag + ')' : ''}`;
         feed.innerHTML = '';
 
-        cards.forEach((card, index) => {
+        filtered.forEach((card, idx) => {
+            // find real index in cards array
+            const realIndex = cards.indexOf(card);
             const cardDiv = document.createElement('div');
             cardDiv.className = 'card';
-            cardDiv.dataset.index = index;
+            cardDiv.dataset.index = realIndex;
+
+            const tagsHtml = (card.tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('');
 
             cardDiv.innerHTML = `
                 <div class="question">${escapeHtml(card.q)}</div>
-                <div class="answer-block" data-index="${index}">
+                ${tagsHtml ? `<div class="tags">${tagsHtml}</div>` : ''}
+                <div class="answer-block" data-index="${realIndex}">
                     <span class="placeholder">👆 Нажми, чтобы открыть ответ</span>
                     <span class="answer-text">${card.a}</span>
                     <div class="edit-actions">
-                        <button class="btn-sm btn-edit edit-btn" data-index="${index}">✏️ Редактировать</button>
+                        <button class="btn-sm btn-edit edit-btn" data-index="${realIndex}">✏️ Редактировать</button>
+                        <button class="btn-sm btn-edit edit-tags-btn" data-index="${realIndex}">🏷️ Теги</button>
                     </div>
-                    <textarea class="edit-area" data-index="${index}"></textarea>
+                    <textarea class="edit-area" data-index="${realIndex}"></textarea>
                     <div class="edit-actions" style="display:none;">
-                        <button class="btn-sm btn-edit save-edit-btn" data-index="${index}">💾 Сохранить</button>
-                        <button class="btn-sm btn-cancel cancel-edit-btn" data-index="${index}">Отмена</button>
+                        <button class="btn-sm btn-edit save-edit-btn" data-index="${realIndex}">💾 Сохранить</button>
+                        <button class="btn-sm btn-cancel cancel-edit-btn" data-index="${realIndex}">Отмена</button>
+                    </div>
+                    <div class="edit-tags-area" style="display:none; margin-top:8px;">
+                        <input type="text" class="tags-edit-input" placeholder="Теги через запятую" value="${escapeHtml((card.tags || []).join(', '))}">
+                        <div style="display:flex; gap:6px; margin-top:6px;">
+                            <button class="btn-sm btn-edit save-tags-btn" data-index="${realIndex}">💾 Сохранить теги</button>
+                            <button class="btn-sm btn-cancel cancel-tags-btn" data-index="${realIndex}">Отмена</button>
+                        </div>
                     </div>
                 </div>
                 <div class="card-footer">
-                    <button class="btn-sm delete-btn" data-index="${index}">🗑 Удалить</button>
+                    <button class="btn-sm delete-btn" data-index="${realIndex}">🗑 Удалить</button>
                 </div>
             `;
 
@@ -570,15 +718,19 @@
     function addCard() {
         const q = qInput.value.trim();
         const a = aInput.value.trim();
+        const tagsRaw = tagInput.value.trim();
         if (!q || !a) {
-            showToast('❌ Заполните оба поля');
+            showToast('❌ Заполните вопрос и ответ');
             return;
         }
-        cards.unshift({ q, a });
+        const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(t => t) : [];
+        cards.unshift({ q, a, tags });
         qInput.value = '';
         aInput.value = '';
+        tagInput.value = '';
         saveCards();
         renderFeed();
+        updateFilterOptions();
         showToast('✅ Добавлено!');
     }
 
@@ -588,6 +740,7 @@
         cards.splice(index, 1);
         saveCards();
         renderFeed();
+        updateFilterOptions();
         showToast('🗑 Удалено');
     }
 
@@ -614,7 +767,9 @@
         const display = block.querySelector('.answer-text');
         const editArea = block.querySelector('.edit-area');
         const editActions = block.querySelectorAll('.edit-actions');
+        const tagsArea = block.querySelector('.edit-tags-area');
 
+        if (tagsArea) tagsArea.style.display = 'none';
         editArea.value = card.a;
         editArea.classList.add('active');
         editArea.style.display = 'block';
@@ -622,6 +777,25 @@
         editActions[1].style.display = 'flex';
         display.style.display = 'none';
         editArea.focus();
+    }
+
+    function openEditTags(block) {
+        const index = parseInt(block.dataset.index);
+        const card = cards[index];
+        if (!card) return;
+
+        const display = block.querySelector('.answer-text');
+        const editArea = block.querySelector('.edit-area');
+        const editActions = block.querySelectorAll('.edit-actions');
+        const tagsArea = block.querySelector('.edit-tags-area');
+        const input = tagsArea.querySelector('.tags-edit-input');
+
+        if (editArea) { editArea.style.display = 'none'; editArea.classList.remove('active'); }
+        editActions[0].style.display = 'none';
+        editActions[1].style.display = 'none';
+        tagsArea.style.display = 'block';
+        input.value = (card.tags || []).join(', ');
+        input.focus();
     }
 
     function saveEdit(block) {
@@ -657,7 +831,9 @@
         const display = block.querySelector('.answer-text');
         const editArea = block.querySelector('.edit-area');
         const editActions = block.querySelectorAll('.edit-actions');
+        const tagsArea = block.querySelector('.edit-tags-area');
 
+        if (tagsArea) tagsArea.style.display = 'none';
         editArea.classList.remove('active');
         editArea.style.display = 'none';
         editActions[0].style.display = 'flex';
@@ -665,6 +841,35 @@
         display.style.display = 'block';
 
         block.classList.remove('revealed');
+        showToast('❌ Отменено');
+    }
+
+    function saveTags(block) {
+        const index = parseInt(block.dataset.index);
+        const card = cards[index];
+        if (!card) return;
+
+        const tagsArea = block.querySelector('.edit-tags-area');
+        const input = tagsArea.querySelector('.tags-edit-input');
+        const tagsRaw = input.value.trim();
+        const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(t => t) : [];
+        card.tags = tags;
+        saveCards();
+
+        tagsArea.style.display = 'none';
+        const editActions = block.querySelectorAll('.edit-actions');
+        editActions[0].style.display = 'flex';
+        block.classList.add('revealed');
+        renderFeed();
+        updateFilterOptions();
+        showToast('✅ Теги обновлены');
+    }
+
+    function cancelTags(block) {
+        const tagsArea = block.querySelector('.edit-tags-area');
+        tagsArea.style.display = 'none';
+        const editActions = block.querySelectorAll('.edit-actions');
+        editActions[0].style.display = 'flex';
         showToast('❌ Отменено');
     }
 
@@ -714,13 +919,15 @@
     // ===== Обработчики =====
     document.getElementById('feed').addEventListener('click', (e) => {
         const target = e.target;
-
         const block = target.closest('.answer-block');
-        if (block && !target.closest('.edit-actions') && !target.closest('.edit-area')) {
+
+        // toggle reveal
+        if (block && !target.closest('.edit-actions') && !target.closest('.edit-area') && !target.closest('.edit-tags-area')) {
             block.classList.toggle('revealed');
             return;
         }
 
+        // delete
         const delBtn = target.closest('.delete-btn');
         if (delBtn) {
             const index = parseInt(delBtn.dataset.index);
@@ -728,13 +935,23 @@
             return;
         }
 
+        // edit answer
         const editBtn = target.closest('.edit-btn');
-        if (editBtn) {
+        if (editBtn && !editBtn.classList.contains('edit-tags-btn')) {
             const block = editBtn.closest('.answer-block');
             if (block) openEdit(block);
             return;
         }
 
+        // edit tags
+        const editTagsBtn = target.closest('.edit-tags-btn');
+        if (editTagsBtn) {
+            const block = editTagsBtn.closest('.answer-block');
+            if (block) openEditTags(block);
+            return;
+        }
+
+        // save edit
         const saveBtn = target.closest('.save-edit-btn');
         if (saveBtn) {
             const block = saveBtn.closest('.answer-block');
@@ -742,10 +959,27 @@
             return;
         }
 
+        // cancel edit
         const cancelBtn = target.closest('.cancel-edit-btn');
         if (cancelBtn) {
             const block = cancelBtn.closest('.answer-block');
             if (block) cancelEdit(block);
+            return;
+        }
+
+        // save tags
+        const saveTagsBtn = target.closest('.save-tags-btn');
+        if (saveTagsBtn) {
+            const block = saveTagsBtn.closest('.answer-block');
+            if (block) saveTags(block);
+            return;
+        }
+
+        // cancel tags
+        const cancelTagsBtn = target.closest('.cancel-tags-btn');
+        if (cancelTagsBtn) {
+            const block = cancelTagsBtn.closest('.answer-block');
+            if (block) cancelTags(block);
             return;
         }
     });
@@ -763,6 +997,21 @@
             addCard();
         }
     });
+    tagInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addCard();
+        }
+    });
+    addTagBtn.addEventListener('click', () => {
+        // just focus on add, but we can add a quick tag from input
+        const val = tagInput.value.trim();
+        if (val) {
+            // if there's already text, add comma
+            // we just use as is
+        }
+        addCard();
+    });
 
     fontSlider.addEventListener('input', (e) => {
         setFontScale(parseFloat(e.target.value));
@@ -776,20 +1025,28 @@
         setFontScale(current - 0.1);
     });
 
+    tagFilter.addEventListener('change', (e) => {
+        filterTag = e.target.value;
+        renderFeed();
+    });
+
+    clearFilter.addEventListener('click', () => {
+        filterTag = '';
+        tagFilter.value = '';
+        renderFeed();
+    });
+
     // ===== Старт =====
     loadTheme();
     loadFontScale();
+    updateFilterOptions();
     renderFeed();
-    console.log('🧠 Лента Припоминания загружена!');
+    console.log('🧠 Лента Припоминания с тегами загружена!');
 
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
 </script>
-
-<script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js');
-  }
-</script>
-
 
 </body>
 </html>
